@@ -497,6 +497,10 @@ pub(crate) struct FunctionConfig {
     read_limit: Option<u64>,
     #[serde(default)]
     write_limit: Option<u64>,
+    /// Inclusive upper bound on the measured `Memory Bytes` metric. `None`
+    /// means this metric is reported but not enforced by `--check`.
+    #[serde(default)]
+    mem_limit: Option<u64>,
     /// Optional per-function override for the regression tolerance. Accepts a
     /// fraction (`0.05`) or a percentage string (`"5%"`).
     #[serde(default, deserialize_with = "deserialize_tolerance")]
@@ -750,14 +754,40 @@ fn render_check_table(reports: &[CostReport], colour: bool) -> String {
     table.to_string()
 }
 
+/// Metrics measured during simulation by cargo-budget-report.
+pub(crate) const SIMULATION_METRICS: &[&str] = &[
+    "CPU Instructions",
+    "Read Bytes",
+    "Write Bytes",
+    "Memory Bytes",
+];
+
 /// Returns the configured limit (if any) for the given metric name.
 pub(crate) fn limit_for_metric(func_config: &FunctionConfig, metric: &str) -> Option<u64> {
     match metric {
         "CPU Instructions" => func_config.cpu_limit,
         "Read Bytes" => func_config.read_limit,
         "Write Bytes" => func_config.write_limit,
+        "Memory Bytes" => func_config.mem_limit,
         _ => None,
     }
+}
+
+/// Verifies that all configured limits correspond to metrics that were actually measured.
+///
+/// If a limit is configured for a metric that the simulation did not measure
+/// (e.g., `mem_limit` is configured, but the RPC simulation did not provide `memory_bytes`),
+/// this returns an error rather than silently passing the check.
+pub(crate) fn verify_configured_limits_measured(
+    func_config: &FunctionConfig,
+    memory_measured: bool,
+) -> Result<()> {
+    if func_config.mem_limit.is_some() && !memory_measured {
+        return Err(Error::Message(
+            "configured `mem_limit` cannot be enforced because Memory Bytes was not measured for this simulation".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Given a measured value and an optional configured limit, returns the
@@ -3595,6 +3625,88 @@ write_limit = 1000
         assert_eq!(cfg.cpu_limit, Some(5000000));
         assert_eq!(cfg.read_limit, Some(5000));
         assert_eq!(cfg.write_limit, Some(1000));
+    }
+
+    #[test]
+    fn mem_limit_set_and_pass() {
+        let toml_str = r#"
+[functions.do_expensive_work]
+mem_limit = 50000
+"#;
+        let config: BudgetToml = toml::from_str(toml_str).unwrap();
+        let func = config.functions.get("do_expensive_work").unwrap();
+        assert_eq!(func.mem_limit, Some(50000));
+        assert_eq!(limit_for_metric(func, "Memory Bytes"), Some(50000));
+
+        let (limit, pass) = evaluate_check(30000, limit_for_metric(func, "Memory Bytes"));
+        assert_eq!(limit, Some(50000));
+        assert_eq!(pass, Some(true));
+    }
+
+    #[test]
+    fn mem_limit_set_and_breach() {
+        let toml_str = r#"
+[functions.do_expensive_work]
+mem_limit = 20000
+"#;
+        let config: BudgetToml = toml::from_str(toml_str).unwrap();
+        let func = config.functions.get("do_expensive_work").unwrap();
+        let (limit, pass) = evaluate_check(25000, limit_for_metric(func, "Memory Bytes"));
+        assert_eq!(limit, Some(20000));
+        assert_eq!(pass, Some(false));
+
+        let exit_code = if pass == Some(false) {
+            EXIT_BUDGET_EXCEEDED
+        } else {
+            EXIT_SUCCESS
+        };
+        assert_eq!(exit_code, 4);
+    }
+
+    #[test]
+    fn mem_limit_not_measured_case_errors() {
+        let toml_str = r#"
+[functions.do_expensive_work]
+mem_limit = 50000
+"#;
+        let config: BudgetToml = toml::from_str(toml_str).unwrap();
+        let func = config.functions.get("do_expensive_work").unwrap();
+        assert!(verify_configured_limits_measured(func, true).is_ok());
+        let err = verify_configured_limits_measured(func, false).unwrap_err();
+        assert!(err.to_string().contains("configured `mem_limit` cannot be enforced"));
+    }
+
+    #[test]
+    fn mem_limit_misspelled_key_rejected_by_deny_unknown_fields() {
+        let toml_str = r#"
+[functions.do_expensive_work]
+mem_lmit = 50000
+"#;
+        let res: std::result::Result<BudgetToml, _> = toml::from_str(toml_str);
+        assert!(res.is_err(), "misspelled key mem_lmit must be rejected");
+        let text = res.unwrap_err().to_string();
+        assert!(text.contains("unknown field `mem_lmit`"), "got: {text}");
+    }
+
+    #[test]
+    fn every_measured_simulation_metric_has_a_limit_key() {
+        let toml_str = r#"
+[functions.test_fn]
+cpu_limit = 1000
+read_limit = 2000
+write_limit = 3000
+mem_limit = 4000
+"#;
+        let config: BudgetToml = toml::from_str(toml_str).unwrap();
+        let func = config.functions.get("test_fn").unwrap();
+
+        for metric in SIMULATION_METRICS {
+            let limit = limit_for_metric(func, metric);
+            assert!(
+                limit.is_some(),
+                "simulation metric `{metric}` must have a corresponding limit key in FunctionConfig and limit_for_metric"
+            );
+        }
     }
 
     #[test]

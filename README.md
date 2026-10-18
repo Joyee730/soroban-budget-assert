@@ -140,6 +140,7 @@ source = "alice"              # Stellar source account keypair name
 [functions.do_expensive_work]
 args = ["--n", "10000"]       # CLI arguments forwarded to the function
 cpu_limit = 5000000           # Optional CPU instruction limit (--check)
+mem_limit = 2000000           # Optional memory limit in bytes (--check)
 read_limit = 5000             # Optional read-bytes limit (--check)
 write_limit = 1000            # Optional write-bytes limit (--check)
 
@@ -178,7 +179,7 @@ Figures produced under a different release profile are different builds and are 
 
 **Enforce Regression Limits (`--check`):**
 
-Add per-function `cpu_limit`, `read_limit`, and/or `write_limit` to `budget.toml`.
+Add per-function `cpu_limit`, `mem_limit`, `read_limit`, and/or `write_limit` to `budget.toml`.
 Then run `cargo budget-report --check` — the measured metrics are compared against
 the configured limits, a clear pass/fail line is printed per function+metric, and
 the process exits non-zero on any breach (or on any configured function whose
@@ -193,6 +194,7 @@ source = "alice"
 [functions.do_expensive_work]
 args = ["--n", "10000"]
 cpu_limit = 5000000
+mem_limit = 2000000
 read_limit = 5000
 write_limit = 1000
 ```

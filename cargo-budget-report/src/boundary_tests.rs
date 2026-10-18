@@ -135,6 +135,7 @@ mod off_by_one_and_zero_length_tests {
             cpu_limit: Some(1),
             read_limit: Some(1),
             write_limit: Some(1),
+            mem_limit: None,
             tolerance: None,
         };
         assert_eq!(limit_for_metric(&config, ""), None);
@@ -147,6 +148,7 @@ mod off_by_one_and_zero_length_tests {
             cpu_limit: Some(9),
             read_limit: Some(8),
             write_limit: Some(7),
+            mem_limit: None,
             tolerance: None,
         };
         // Substring / prefix matches must not succeed — matching is exact.
@@ -163,6 +165,7 @@ mod off_by_one_and_zero_length_tests {
             cpu_limit: Some(0),
             read_limit: Some(0),
             write_limit: Some(0),
+            mem_limit: None,
             tolerance: None,
         };
         assert_eq!(limit_for_metric(&config, "CPU Instructions"), Some(0));
@@ -177,6 +180,7 @@ mod off_by_one_and_zero_length_tests {
             cpu_limit: Some(u64::MAX),
             read_limit: Some(u64::MAX),
             write_limit: Some(u64::MAX),
+            mem_limit: None,
             tolerance: None,
         };
         assert_eq!(
@@ -285,6 +289,7 @@ mod off_by_one_and_zero_length_tests {
             cpu_limit: Some(0),
             read_limit: Some(0),
             write_limit: Some(0),
+            mem_limit: None,
             tolerance: None,
         };
         emit_check_failure_entries(&mut reports, "", "", &config);
@@ -324,6 +329,7 @@ mod off_by_one_and_zero_length_tests {
             cpu_limit: Some(1),
             read_limit: Some(2),
             write_limit: Some(3),
+            mem_limit: None,
             tolerance: None,
         };
         emit_check_failure_entries(&mut reports, "pkg", "fn", &config);

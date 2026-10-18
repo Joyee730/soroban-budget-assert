@@ -33,6 +33,7 @@ mod helpers {
             cpu_limit: cpu,
             read_limit: read,
             write_limit: write,
+            mem_limit: None,
             tolerance: None,
         }
     }
