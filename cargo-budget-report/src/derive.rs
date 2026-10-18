@@ -183,15 +183,14 @@ pub fn load_tier_b_report(path: &Path) -> Result<Vec<TierBMeasurement>> {
         std::fs::read_to_string(path)
             .map_err(|e| Error::Message(format!("failed to read {}: {e}", path.display())))?
     };
-    let parsed: TierBReportShape = serde_json::from_str(&contents).map_err(|e| {
-        Error::Message(format!(
-            "failed to parse Tier B JSON as either {{\"schema_version\":..., \"snapshots\":[...]}} or a bare array: {e}"
-        ))
-    })?;
-    Ok(match parsed {
-        TierBReportShape::Wrapped { snapshots, .. } => snapshots,
-        TierBReportShape::Bare(items) => items,
-    })
+    let value: serde_json::Value = serde_json::from_str(&contents).map_err(Error::Json)?;
+    let snapshots_opt = crate::json_output::validate_report_schema(&value, path)?;
+    let measurements: Vec<TierBMeasurement> = match snapshots_opt {
+        Some(snapshots) => serde_json::from_value(serde_json::Value::Array(snapshots.clone()))
+            .map_err(Error::Json)?,
+        None => serde_json::from_value(value).map_err(Error::Json)?,
+    };
+    Ok(measurements)
 }
 
 /// One row of the output env file. Each row records both the
@@ -850,5 +849,63 @@ mod tests {
         for (label, expected) in table {
             assert_eq!(m.for_metric(label), Some(expected));
         }
+    }
+
+    #[test]
+    fn load_tier_b_report_accepts_version_1_and_bare_array() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let wrapped = serde_json::json!({
+            "schema_version": 1,
+            "snapshots": [
+                {"package": "p", "function": "f", "metric": "CPU Instructions", "value": 1000}
+            ]
+        });
+        std::fs::write(tmp.path(), wrapped.to_string()).unwrap();
+        let reports = load_tier_b_report(tmp.path()).unwrap();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].package, "p");
+
+        let bare = serde_json::json!([
+            {"package": "p", "function": "f", "metric": "Read Bytes", "value": 500}
+        ]);
+        std::fs::write(tmp.path(), bare.to_string()).unwrap();
+        let bare_reports = load_tier_b_report(tmp.path()).unwrap();
+        assert_eq!(bare_reports.len(), 1);
+        assert_eq!(bare_reports[0].value, 500);
+    }
+
+    #[test]
+    fn load_tier_b_report_rejects_unsupported_version() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let bad_json = serde_json::json!({
+            "schema_version": 2,
+            "snapshots": []
+        });
+        std::fs::write(tmp.path(), bad_json.to_string()).unwrap();
+        let err = load_tier_b_report(tmp.path()).unwrap_err();
+        assert_eq!(err.exit_code(), crate::error::EXIT_CONFIG_ERROR);
+        let msg = err.to_string();
+        assert!(msg.contains("unsupported schema_version 2 in"), "got: {msg}");
+        assert!(msg.contains("accepted versions are [1]"), "got: {msg}");
+    }
+
+    #[test]
+    fn load_tier_b_report_accepts_writer_render_json_round_trip() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let cost_report = crate::CostReport {
+            package: "my-pkg".to_string(),
+            function: "my_fn".to_string(),
+            metric: "CPU Instructions",
+            value: Some(42000),
+            limit: None,
+            pass: None,
+        };
+        let rendered = crate::json_output::render_json(&[cost_report]);
+        std::fs::write(tmp.path(), rendered).unwrap();
+        let loaded = load_tier_b_report(tmp.path()).expect("writer output must be accepted by load_tier_b_report");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].package, "my-pkg");
+        assert_eq!(loaded[0].function, "my_fn");
+        assert_eq!(loaded[0].value, 42000);
     }
 }

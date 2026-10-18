@@ -318,3 +318,36 @@ fn exit_code_regression_when_baseline_is_exceeded() {
         "regression should not be reported as a generic error: {stderr}"
     );
 }
+
+#[test]
+fn exit_code_config_error_on_unsupported_schema_version() {
+    let workspace = setup_mock_workspace();
+    let unsupported_json = workspace.path().join("unsupported_report.json");
+    fs::write(
+        &unsupported_json,
+        "{\"schema_version\": 99, \"snapshots\": []}",
+    )
+    .expect("failed to write unsupported report");
+
+    let assert = budget_report_cmd(workspace.path())
+        .args(BASE_ARGS)
+        .args(["--markdown", "--from", "unsupported_report.json"])
+        .assert();
+    let output = assert.get_output();
+    assert_eq!(
+        output.status.code(),
+        Some(EXIT_CONFIG_ERROR),
+        "unsupported schema_version should exit 3 (config error)\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unsupported schema_version 99"),
+        "stderr should mention unsupported schema_version: {stderr}"
+    );
+    assert!(
+        stderr.contains("accepted versions are [1]"),
+        "stderr should mention accepted versions: {stderr}"
+    );
+}

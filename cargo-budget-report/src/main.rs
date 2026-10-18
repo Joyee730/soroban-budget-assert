@@ -526,6 +526,10 @@ fn load_cost_reports(path: &Path) -> Result<Vec<CostReport>> {
             .map_err(|e| Error::Message(format!("failed to read {}: {e}", path.display())))?
     };
 
+    let value: serde_json::Value = serde_json::from_str(&contents).map_err(Error::Json)?;
+
+    let snapshots_opt = json_output::validate_report_schema(&value, path)?;
+
     #[derive(serde::Deserialize)]
     struct RawReport {
         package: String,
@@ -539,19 +543,10 @@ fn load_cost_reports(path: &Path) -> Result<Vec<CostReport>> {
         pass: Option<bool>,
     }
 
-    #[derive(serde::Deserialize)]
-    #[serde(untagged)]
-    enum ReportShape {
-        Wrapped { snapshots: Vec<RawReport> },
-        Bare(Vec<RawReport>),
-    }
-
-    let parsed: ReportShape = serde_json::from_str(&contents)
-        .map_err(|e| Error::Message(format!("failed to parse report JSON: {e}")))?;
-
-    let raw_list = match parsed {
-        ReportShape::Wrapped { snapshots } => snapshots,
-        ReportShape::Bare(items) => items,
+    let raw_list: Vec<RawReport> = match snapshots_opt {
+        Some(snapshots) => serde_json::from_value(serde_json::Value::Array(snapshots.clone()))
+            .map_err(Error::Json)?,
+        None => serde_json::from_value(value).map_err(Error::Json)?,
     };
 
     let reports = raw_list
@@ -3352,6 +3347,81 @@ mod tests {
         assert_eq!(func.cpu_limit, Some(5_000_000));
         assert_eq!(func.read_limit, Some(5_000));
         assert_eq!(func.write_limit, Some(1_000));
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn load_cost_reports_accepts_version_1_and_bare_array() {
+        let path = unique_test_path();
+        let wrapped = serde_json::json!({
+            "schema_version": 1,
+            "snapshots": [
+                {
+                    "package": "amm-pool-contract",
+                    "function": "deposit",
+                    "metric": "CPU Instructions",
+                    "value": 12345
+                }
+            ]
+        });
+        fs::write(&path, wrapped.to_string()).unwrap();
+        let reports = load_cost_reports(&path).unwrap();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(reports[0].package, "amm-pool-contract");
+        assert_eq!(reports[0].value, Some(12345));
+
+        let bare = serde_json::json!([
+            {
+                "package": "amm-pool-contract",
+                "function": "withdraw",
+                "metric": "Read Bytes",
+                "value": 678
+            }
+        ]);
+        fs::write(&path, bare.to_string()).unwrap();
+        let bare_reports = load_cost_reports(&path).unwrap();
+        assert_eq!(bare_reports.len(), 1);
+        assert_eq!(bare_reports[0].function, "withdraw");
+        assert_eq!(bare_reports[0].value, Some(678));
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn load_cost_reports_rejects_unsupported_version_with_exit_code_3() {
+        let path = unique_test_path();
+        let bad = serde_json::json!({
+            "schema_version": 42,
+            "snapshots": []
+        });
+        fs::write(&path, bad.to_string()).unwrap();
+        let err = load_cost_reports(&path).unwrap_err();
+        assert_eq!(err.exit_code(), crate::error::EXIT_CONFIG_ERROR);
+        let msg = err.to_string();
+        assert!(msg.contains("unsupported schema_version 42 in"), "got: {msg}");
+        assert!(msg.contains("accepted versions are [1]"), "got: {msg}");
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn load_cost_reports_accepts_writer_render_json_round_trip() {
+        let path = unique_test_path();
+        let report = CostReport {
+            package: "my-pkg".to_string(),
+            function: "my_fn".to_string(),
+            metric: "CPU Instructions",
+            value: Some(9999),
+            limit: Some(15000),
+            pass: Some(true),
+        };
+        let json_str = json_output::render_json(&[report]);
+        fs::write(&path, json_str).unwrap();
+        let loaded = load_cost_reports(&path).expect("writer output must be accepted by load_cost_reports");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].package, "my-pkg");
+        assert_eq!(loaded[0].function, "my_fn");
+        assert_eq!(loaded[0].value, Some(9999));
+        assert_eq!(loaded[0].limit, Some(15000));
+        assert_eq!(loaded[0].pass, Some(true));
         let _ = fs::remove_file(&path);
     }
 
