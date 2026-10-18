@@ -138,10 +138,7 @@ mod off_by_one_and_zero_length_tests {
             mem_limit: Some(2_000_000),
             tolerance: None,
         };
-        assert_eq!(
-            limit_for_metric(&config, "Memory Bytes"),
-            Some(2_000_000)
-        );
+        assert_eq!(limit_for_metric(&config, "Memory Bytes"), Some(2_000_000));
     }
 
     #[test]

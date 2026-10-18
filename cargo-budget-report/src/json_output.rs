@@ -14,9 +14,9 @@
 //! `json_output::render_json` is the single place that produces the envelope;
 //! the versioning policy itself is documented in `docs/src/reference.md`.
 
-use std::path::Path;
-use serde::Serialize;
 use crate::error::{Error, Result};
+use serde::Serialize;
+use std::path::Path;
 
 /// Current JSON schema version for budget report output.
 ///
@@ -80,15 +80,15 @@ pub(crate) fn validate_report_schema<'a>(
         if let Some(n) = version_val.as_u64() {
             if let Ok(v32) = u32::try_from(n) {
                 if ACCEPTED_SCHEMA_VERSIONS.contains(&v32) {
-                    let snapshots = obj
-                        .get("snapshots")
-                        .and_then(|s| s.as_array())
-                        .ok_or_else(|| {
-                            Error::Json(serde::de::Error::custom(format!(
-                                "missing or invalid `snapshots` array in wrapped report {}",
-                                path.display()
-                            )))
-                        })?;
+                    let snapshots =
+                        obj.get("snapshots")
+                            .and_then(|s| s.as_array())
+                            .ok_or_else(|| {
+                                Error::Json(serde::de::Error::custom(format!(
+                                    "missing or invalid `snapshots` array in wrapped report {}",
+                                    path.display()
+                                )))
+                            })?;
                     return Ok(Some(snapshots));
                 }
             }
@@ -97,14 +97,14 @@ pub(crate) fn validate_report_schema<'a>(
                 n,
                 path.display(),
                 ACCEPTED_SCHEMA_VERSIONS
-            )))));
+            ))));
         } else {
             return Err(Error::Json(serde::de::Error::custom(format!(
                 "invalid schema_version {} in {}; accepted versions are {:?}",
                 version_val,
                 path.display(),
                 ACCEPTED_SCHEMA_VERSIONS
-            )))));
+            ))));
         }
     }
 
@@ -307,7 +307,10 @@ mod tests {
         let err = validate_report_schema(&val, Path::new("test_report.json")).unwrap_err();
         assert_eq!(err.exit_code(), crate::error::EXIT_CONFIG_ERROR);
         let msg = err.to_string();
-        assert!(msg.contains("unsupported schema_version 2 in test_report.json"), "got: {msg}");
+        assert!(
+            msg.contains("unsupported schema_version 2 in test_report.json"),
+            "got: {msg}"
+        );
         assert!(msg.contains("accepted versions are [1]"), "got: {msg}");
     }
 
@@ -320,7 +323,10 @@ mod tests {
         let err = validate_report_schema(&val, Path::new("test_report.json")).unwrap_err();
         assert_eq!(err.exit_code(), crate::error::EXIT_CONFIG_ERROR);
         let msg = err.to_string();
-        assert!(msg.contains("unsupported schema_version 0 in test_report.json"), "got: {msg}");
+        assert!(
+            msg.contains("unsupported schema_version 0 in test_report.json"),
+            "got: {msg}"
+        );
         assert!(msg.contains("accepted versions are [1]"), "got: {msg}");
     }
 
@@ -332,7 +338,10 @@ mod tests {
         let err = validate_report_schema(&val, Path::new("test_report.json")).unwrap_err();
         assert_eq!(err.exit_code(), crate::error::EXIT_CONFIG_ERROR);
         let msg = err.to_string();
-        assert!(msg.contains("missing schema_version in wrapped report test_report.json"), "got: {msg}");
+        assert!(
+            msg.contains("missing schema_version in wrapped report test_report.json"),
+            "got: {msg}"
+        );
         assert!(msg.contains("accepted versions are [1]"), "got: {msg}");
     }
 
@@ -345,7 +354,10 @@ mod tests {
         let err = validate_report_schema(&val, Path::new("test_report.json")).unwrap_err();
         assert_eq!(err.exit_code(), crate::error::EXIT_CONFIG_ERROR);
         let msg = err.to_string();
-        assert!(msg.contains("invalid schema_version: null in test_report.json"), "got: {msg}");
+        assert!(
+            msg.contains("invalid schema_version: null in test_report.json"),
+            "got: {msg}"
+        );
         assert!(msg.contains("accepted versions are [1]"), "got: {msg}");
     }
 
@@ -358,7 +370,10 @@ mod tests {
         let err = validate_report_schema(&neg, Path::new("test_report.json")).unwrap_err();
         assert_eq!(err.exit_code(), crate::error::EXIT_CONFIG_ERROR);
         let msg = err.to_string();
-        assert!(msg.contains("invalid schema_version -1 in test_report.json"), "got: {msg}");
+        assert!(
+            msg.contains("invalid schema_version -1 in test_report.json"),
+            "got: {msg}"
+        );
         assert!(msg.contains("accepted versions are [1]"), "got: {msg}");
 
         let str_val = serde_json::json!({
@@ -368,7 +383,10 @@ mod tests {
         let err2 = validate_report_schema(&str_val, Path::new("test_report.json")).unwrap_err();
         assert_eq!(err2.exit_code(), crate::error::EXIT_CONFIG_ERROR);
         let msg2 = err2.to_string();
-        assert!(msg2.contains("invalid schema_version \"1\" in test_report.json"), "got: {msg2}");
+        assert!(
+            msg2.contains("invalid schema_version \"1\" in test_report.json"),
+            "got: {msg2}"
+        );
     }
 
     #[test]
@@ -382,7 +400,10 @@ mod tests {
         let err = validate_report_schema(&val, Path::new("broken.json")).unwrap_err();
         assert_eq!(err.exit_code(), crate::error::EXIT_CONFIG_ERROR);
         let msg = err.to_string();
-        assert!(msg.contains("unsupported schema_version 99 in broken.json"), "got: {msg}");
+        assert!(
+            msg.contains("unsupported schema_version 99 in broken.json"),
+            "got: {msg}"
+        );
         assert!(msg.contains("accepted versions are [1]"), "got: {msg}");
     }
 }

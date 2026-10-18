@@ -147,8 +147,7 @@ pub struct TierBMeasurement {
     pub value: u64,
 }
 
-/// One row of the source Tier B JSON after we accept both the bare
-/// array and the `{schema_version, snapshots}` wrapped forms.
+#[cfg(test)]
 #[derive(Clone, Debug, Deserialize)]
 #[serde(untagged)]
 enum TierBReportShape {
@@ -161,6 +160,7 @@ enum TierBReportShape {
     Bare(Vec<TierBMeasurement>),
 }
 
+#[cfg(test)]
 fn default_schema_version() -> u32 {
     1
 }
@@ -885,7 +885,10 @@ mod tests {
         let err = load_tier_b_report(tmp.path()).unwrap_err();
         assert_eq!(err.exit_code(), crate::error::EXIT_CONFIG_ERROR);
         let msg = err.to_string();
-        assert!(msg.contains("unsupported schema_version 2 in"), "got: {msg}");
+        assert!(
+            msg.contains("unsupported schema_version 2 in"),
+            "got: {msg}"
+        );
         assert!(msg.contains("accepted versions are [1]"), "got: {msg}");
     }
 
@@ -902,7 +905,8 @@ mod tests {
         };
         let rendered = crate::json_output::render_json(&[cost_report]);
         std::fs::write(tmp.path(), rendered).unwrap();
-        let loaded = load_tier_b_report(tmp.path()).expect("writer output must be accepted by load_tier_b_report");
+        let loaded = load_tier_b_report(tmp.path())
+            .expect("writer output must be accepted by load_tier_b_report");
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].package, "my-pkg");
         assert_eq!(loaded[0].function, "my_fn");

@@ -282,7 +282,10 @@ pub(crate) fn validate_budget_toml(
                 let known: HashSet<&str> = available_functions.iter().map(String::as_str).collect();
                 let mut hint: Option<(Vec<&str>, String)> = None;
                 for name in fns.keys() {
-                    let bare_name = name.split_once("::").map(|(_, f)| f).unwrap_or(name.as_str());
+                    let bare_name = name
+                        .split_once("::")
+                        .map(|(_, f)| f)
+                        .unwrap_or(name.as_str());
                     if known.contains(bare_name) {
                         continue;
                     }

@@ -755,6 +755,7 @@ fn render_check_table(reports: &[CostReport], colour: bool) -> String {
 }
 
 /// Metrics measured during simulation by cargo-budget-report.
+#[allow(dead_code)]
 pub(crate) const SIMULATION_METRICS: &[&str] = &[
     "CPU Instructions",
     "Read Bytes",
@@ -778,6 +779,7 @@ pub(crate) fn limit_for_metric(func_config: &FunctionConfig, metric: &str) -> Op
 /// If a limit is configured for a metric that the simulation did not measure
 /// (e.g., `mem_limit` is configured, but the RPC simulation did not provide `memory_bytes`),
 /// this returns an error rather than silently passing the check.
+#[allow(dead_code)]
 pub(crate) fn verify_configured_limits_measured(
     func_config: &FunctionConfig,
     memory_measured: bool,
@@ -3477,10 +3479,16 @@ mod tests {
             "snapshots": []
         });
         fs::write(&path, bad.to_string()).unwrap();
-        let err = load_cost_reports(&path).unwrap_err();
+        let err = match load_cost_reports(&path) {
+            Err(e) => e,
+            Ok(_) => panic!("expected load_cost_reports to fail on unsupported schema_version"),
+        };
         assert_eq!(err.exit_code(), crate::error::EXIT_CONFIG_ERROR);
         let msg = err.to_string();
-        assert!(msg.contains("unsupported schema_version 42 in"), "got: {msg}");
+        assert!(
+            msg.contains("unsupported schema_version 42 in"),
+            "got: {msg}"
+        );
         assert!(msg.contains("accepted versions are [1]"), "got: {msg}");
         let _ = fs::remove_file(&path);
     }
@@ -3498,7 +3506,8 @@ mod tests {
         };
         let json_str = json_output::render_json(&[report]);
         fs::write(&path, json_str).unwrap();
-        let loaded = load_cost_reports(&path).expect("writer output must be accepted by load_cost_reports");
+        let loaded =
+            load_cost_reports(&path).expect("writer output must be accepted by load_cost_reports");
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].package, "my-pkg");
         assert_eq!(loaded[0].function, "my_fn");
@@ -3583,12 +3592,15 @@ cpu_limit = 500000
 "#;
         let config: BudgetToml = toml::from_str(toml_str).unwrap();
         let exporting = ["contract_beta", "contract_alpha"];
-        let err = resolve_function_config(&config, "contract_alpha", "transfer", &exporting)
-            .unwrap_err();
+        let err =
+            resolve_function_config(&config, "contract_alpha", "transfer", &exporting).unwrap_err();
         assert_eq!(err.exit_code(), crate::error::EXIT_CONFIG_ERROR);
         let msg = err.to_string();
         assert!(msg.contains("contract_alpha, contract_beta"), "got: {msg}");
-        assert!(msg.contains("[functions.\"contract_alpha::transfer\"]"), "got: {msg}");
+        assert!(
+            msg.contains("[functions.\"contract_alpha::transfer\"]"),
+            "got: {msg}"
+        );
     }
 
     #[test]
@@ -3600,7 +3612,8 @@ cpu_limit = 100
         let config: BudgetToml = toml::from_str(toml_str).unwrap();
         let res = resolve_function_config(&config, "pkg_a", "missing_fn", &["pkg_a"]).unwrap();
         assert!(res.is_none());
-        let res_pkg = resolve_function_config(&config, "unknown_pkg", "transfer", &["unknown_pkg"]).unwrap();
+        let res_pkg =
+            resolve_function_config(&config, "unknown_pkg", "transfer", &["unknown_pkg"]).unwrap();
         assert!(res_pkg.is_none());
     }
 
@@ -3673,7 +3686,9 @@ mem_limit = 50000
         let func = config.functions.get("do_expensive_work").unwrap();
         assert!(verify_configured_limits_measured(func, true).is_ok());
         let err = verify_configured_limits_measured(func, false).unwrap_err();
-        assert!(err.to_string().contains("configured `mem_limit` cannot be enforced"));
+        assert!(err
+            .to_string()
+            .contains("configured `mem_limit` cannot be enforced"));
     }
 
     #[test]
