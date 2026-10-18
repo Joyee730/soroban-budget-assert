@@ -350,6 +350,39 @@ pub(crate) struct BudgetToml {
     retry: Option<RetryToml>,
 }
 
+/// Resolve the configuration for an exported function of a given package.
+///
+/// Precedence & Collision Rules:
+/// 1. A package-qualified entry `[functions."<package>::<function>"]` takes precedence.
+/// 2. A flat entry `[functions.<function>]` acts as a fallback when exactly one measured
+///    package exports this function.
+/// 3. When multiple measured packages export the same function name, a flat entry is rejected
+///    with a named configuration error (exit code 3) that names the exporting packages and
+///    explains how to qualify the entry.
+pub(crate) fn resolve_function_config<'a>(
+    toml_config: &'a BudgetToml,
+    package_name: &str,
+    function: &str,
+    exporting_packages: &[&str],
+) -> Result<Option<&'a FunctionConfig>> {
+    let qualified_key = format!("{package_name}::{function}");
+    if let Some(cfg) = toml_config.functions.get(&qualified_key) {
+        return Ok(Some(cfg));
+    }
+    if let Some(cfg) = toml_config.functions.get(function) {
+        if exporting_packages.len() > 1 {
+            let mut pkgs = exporting_packages.to_vec();
+            pkgs.sort();
+            return Err(Error::Toml(<toml::de::Error as serde::de::Error>::custom(format!(
+                "function `{function}` is exported by multiple packages ({}), but `[functions.{function}]` is not package-scoped. Qualify the entry as `[functions.\"{package_name}::{function}\"]` to resolve the ambiguity.",
+                pkgs.join(", ")
+            ))));
+        }
+        return Ok(Some(cfg));
+    }
+    Ok(None)
+}
+
 /// Per-metric margin multipliers persisted in `budget.toml`.
 ///
 /// All four fields are independently optional, but `Margin::new`
@@ -2168,7 +2201,17 @@ fn run() -> Result<i32> {
                 ));
             }
 
-            let func_config = toml_config.functions.get(function);
+            let exporting: Vec<&str> = prepared
+                .iter()
+                .filter(|c| c.exported_fns.contains(function))
+                .map(|c| c.package_name.as_str())
+                .collect();
+            let func_config = resolve_function_config(
+                &toml_config,
+                &contract.package_name,
+                function,
+                &exporting,
+            )?;
             let func_args = match func_config {
                 Some(cfg) => arg_spec::render_args(&cfg.args, function)
                     .map_err(|e| Error::Message(format!("{e:#}")))?,
@@ -2260,7 +2303,17 @@ fn run() -> Result<i32> {
 
         for (index, outcome) in collected {
             let function = &tasks[index].0;
-            let func_config = toml_config.functions.get(function);
+            let exporting: Vec<&str> = prepared
+                .iter()
+                .filter(|c| c.exported_fns.contains(function))
+                .map(|c| c.package_name.as_str())
+                .collect();
+            let func_config = resolve_function_config(
+                &toml_config,
+                &contract.package_name,
+                function,
+                &exporting,
+            )?;
 
             match outcome {
                 Ok(SimulationOutcome::Metrics {
@@ -3423,6 +3476,125 @@ mod tests {
         assert_eq!(loaded[0].limit, Some(15000));
         assert_eq!(loaded[0].pass, Some(true));
         let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn proving_bug_flat_entry_collides_across_packages() {
+        // First prove the bug: two measured packages exporting `transfer`, one flat
+        // `[functions.transfer]` config with a limit intended for only one of them.
+        // Before package-scoping, `functions.get("transfer")` applied identically to both packages.
+        let toml_str = r#"
+[functions.transfer]
+cpu_limit = 1000000
+"#;
+        let config: BudgetToml = toml::from_str(toml_str).unwrap();
+        let raw_pkg_a = config.functions.get("transfer");
+        let raw_pkg_b = config.functions.get("transfer");
+        assert_eq!(raw_pkg_a.and_then(|c| c.cpu_limit), Some(1000000));
+        assert_eq!(raw_pkg_b.and_then(|c| c.cpu_limit), Some(1000000));
+    }
+
+    #[test]
+    fn resolve_function_config_two_packages_configured_independently() {
+        let toml_str = r#"
+[functions."pkg_a::transfer"]
+cpu_limit = 100000
+
+[functions."pkg_b::transfer"]
+cpu_limit = 500000
+"#;
+        let config: BudgetToml = toml::from_str(toml_str).unwrap();
+        let exporting = ["pkg_a", "pkg_b"];
+        let cfg_a = resolve_function_config(&config, "pkg_a", "transfer", &exporting)
+            .unwrap()
+            .expect("pkg_a should resolve");
+        assert_eq!(cfg_a.cpu_limit, Some(100000));
+
+        let cfg_b = resolve_function_config(&config, "pkg_b", "transfer", &exporting)
+            .unwrap()
+            .expect("pkg_b should resolve");
+        assert_eq!(cfg_b.cpu_limit, Some(500000));
+    }
+
+    #[test]
+    fn resolve_function_config_qualified_entry_overrides_flat() {
+        let toml_str = r#"
+[functions."pkg_a::transfer"]
+cpu_limit = 111111
+
+[functions.transfer]
+cpu_limit = 999999
+"#;
+        let config: BudgetToml = toml::from_str(toml_str).unwrap();
+        let cfg = resolve_function_config(&config, "pkg_a", "transfer", &["pkg_a"])
+            .unwrap()
+            .expect("should resolve");
+        assert_eq!(cfg.cpu_limit, Some(111111));
+    }
+
+    #[test]
+    fn resolve_function_config_flat_fallback_with_single_package() {
+        let toml_str = r#"
+[functions.transfer]
+cpu_limit = 424242
+"#;
+        let config: BudgetToml = toml::from_str(toml_str).unwrap();
+        let cfg = resolve_function_config(&config, "single_pkg", "transfer", &["single_pkg"])
+            .unwrap()
+            .expect("should resolve flat fallback for single package");
+        assert_eq!(cfg.cpu_limit, Some(424242));
+    }
+
+    #[test]
+    fn resolve_function_config_ambiguity_error_names_packages_and_exit_code() {
+        let toml_str = r#"
+[functions.transfer]
+cpu_limit = 500000
+"#;
+        let config: BudgetToml = toml::from_str(toml_str).unwrap();
+        let exporting = ["contract_beta", "contract_alpha"];
+        let err = resolve_function_config(&config, "contract_alpha", "transfer", &exporting)
+            .unwrap_err();
+        assert_eq!(err.exit_code(), crate::error::EXIT_CONFIG_ERROR);
+        let msg = err.to_string();
+        assert!(msg.contains("contract_alpha, contract_beta"), "got: {msg}");
+        assert!(msg.contains("[functions.\"contract_alpha::transfer\"]"), "got: {msg}");
+    }
+
+    #[test]
+    fn resolve_function_config_nonexistent_function_handled_as_unknown() {
+        let toml_str = r#"
+[functions."pkg_a::transfer"]
+cpu_limit = 100
+"#;
+        let config: BudgetToml = toml::from_str(toml_str).unwrap();
+        let res = resolve_function_config(&config, "pkg_a", "missing_fn", &["pkg_a"]).unwrap();
+        assert!(res.is_none());
+        let res_pkg = resolve_function_config(&config, "unknown_pkg", "transfer", &["unknown_pkg"]).unwrap();
+        assert!(res_pkg.is_none());
+    }
+
+    #[test]
+    fn resolve_function_config_single_contract_fixture_parses_unchanged() {
+        let toml_str = r#"
+[functions.do_expensive_work]
+args = ["--n", "10000"]
+cpu_limit = 5000000
+read_limit = 5000
+write_limit = 1000
+"#;
+        let config: BudgetToml = toml::from_str(toml_str).unwrap();
+        let cfg = resolve_function_config(
+            &config,
+            "amm-pool-contract",
+            "do_expensive_work",
+            &["amm-pool-contract"],
+        )
+        .unwrap()
+        .expect("single contract fixture must parse and resolve unchanged");
+        assert_eq!(cfg.cpu_limit, Some(5000000));
+        assert_eq!(cfg.read_limit, Some(5000));
+        assert_eq!(cfg.write_limit, Some(1000));
     }
 
     #[test]

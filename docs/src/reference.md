@@ -887,7 +887,7 @@ Where a value can come from more than one place, this is the exact order the res
 
 ### `functions.<name>`: per-function configuration
 
-The section key `<name>` must match the **exported WASM function name exactly** (case-sensitive). Names are not package-qualified: if two contracts export the same function name, the single entry applies to both simulations.
+The section key `<name>` must match the **exported WASM function name exactly** (case-sensitive), or be package-qualified using the quoted `[functions."<package>::<function>"]` syntax. A package-qualified entry takes precedence over a bare entry. A bare entry serves as a fallback when exactly one measured package exports that function. If multiple measured packages export the same function name and only a bare entry is provided, `cargo-budget-report` fails with a configuration error (exit code 3) to prevent ambiguous configuration across packages.
 
 | Field | Type | Required | Default | Effect |
 |---|---|---|---|---|
@@ -916,7 +916,7 @@ Simulation is driven by what the workspace *exports*, not by what the file decla
 3. Config entries are then looked up by name. Consequences:
    - An entry for a function absent from every package's exports is **ignored silently** (see the warning above).
    - A package cannot be "listed" in `budget.toml` at all — there is no per-package section. Packages are discovered from `cargo metadata`, and removing or renaming a package needs no config change; renaming an exported *function*, however, orphans its entry silently.
-   - Because entries are keyed by bare function name, one entry fans out to every package exporting that name.
+   - Function entries can be package-qualified (`[functions."<package>::<function>"]`) or flat (`[functions.<function>]`). A qualified entry takes precedence. When a flat entry would apply to a function exported by multiple measured packages, the run fails with a configuration error (exit code 3) requiring package qualification.
 
 ### `margin`: deriving Tier A limits
 

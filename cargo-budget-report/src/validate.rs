@@ -282,7 +282,8 @@ pub(crate) fn validate_budget_toml(
                 let known: HashSet<&str> = available_functions.iter().map(String::as_str).collect();
                 let mut hint: Option<(Vec<&str>, String)> = None;
                 for name in fns.keys() {
-                    if known.contains(name.as_str()) {
+                    let bare_name = name.split_once("::").map(|(_, f)| f).unwrap_or(name.as_str());
+                    if known.contains(bare_name) {
                         continue;
                     }
                     let (candidate_list, avail_list) = hint.get_or_insert_with(|| {
@@ -291,7 +292,7 @@ pub(crate) fn validate_budget_toml(
                             available_functions.join(", "),
                         )
                     });
-                    let suggestion = closest_match(name, candidate_list.as_slice());
+                    let suggestion = closest_match(bare_name, candidate_list.as_slice());
                     errors.push(ValidationError::new(
                         "budget.toml [functions]",
                         match suggestion {
@@ -959,5 +960,21 @@ mod tests {
             }
             ValidationResult::Skipped { .. } => {}
         }
+    }
+
+    #[test]
+    fn validate_budget_toml_accepts_qualified_function_name() {
+        let toml = "[functions.\"amm-pool-contract::swap\"]\ncpu_limit = 1000\n";
+        let available = vec!["swap".to_string(), "deposit".to_string()];
+        assert!(validate_budget_toml(toml, &available).is_ok());
+    }
+
+    #[test]
+    fn validate_budget_toml_suggests_typo_for_qualified_function_name() {
+        let toml = "[functions.\"amm-pool-contract::swapp\"]\ncpu_limit = 1000\n";
+        let available = vec!["swap".to_string(), "deposit".to_string()];
+        let errs = validate_budget_toml(toml, &available).unwrap_err();
+        assert_eq!(errs.len(), 1);
+        assert!(errs[0].message.contains("did you mean `swap`?"));
     }
 }
