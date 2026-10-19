@@ -187,11 +187,14 @@ This workspace configures both `clippy.toml` and `rustfmt.toml` at the repositor
 Most Rust-enabled editors (such as VS Code with `rust-analyzer`) automatically detect `rustfmt.toml` and `clippy.toml` at the workspace root when formatting on save. If your editor formats using a different style, ensure rust-analyzer is configured to use cargo/workspace commands (`"rust-analyzer.rustfmt.overrideCommand": ["cargo", "fmt", "--", "--config-path", "rustfmt.toml"]`).
 
 ### Pre-Push Verification Checklist
-Before submitting a pull request, run the following commands locally from the workspace root to ensure all quality gates pass:
+Before submitting a pull request, run every command enforced by the Code Quality job locally from the workspace root to ensure all quality gates pass:
 ```bash
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+scripts/check-module-reachability.sh
+cargo install cargo-machete --version 0.6.2 --locked
+cargo machete
 ```
 
 `cargo test --workspace` works on a clean checkout: the WASM-dependent tests
@@ -204,15 +207,14 @@ Please follow the styling and architectural patterns already used in the codebas
 ## Repository configuration
 
 Repository topics and branch protection are tracked in [`.github/settings.yml`](.github/settings.yml).
-The configuration uses the Probot Settings application to apply repository settings from this
-file. A repository administrator must install and authorize the Settings application for this
-repository with permission to administer repository settings, then apply the configuration from
-the default branch.
+The configuration is applied manually by a repository administrator with the Probot Settings
+application after changes are merged to `main`. The administrator must first install and authorize
+the application for this repository with permission to administer repository settings.
 
 The configuration maintains the following topics: `soroban`, `stellar`, `rust`, `blockchain`,
-`github-actions`, and `developer-tools`. The `main` branch requires the `Quality Checks` status
-check, one approving review, linear history, and resolved conversations. Force-pushes and branch
-deletions are disabled.
+`github-actions`, and `developer-tools`. The `main` branch requires the `lint` and `budget-check`
+status checks, one approving review, linear history, and resolved conversations. Force-pushes and
+branch deletions are disabled.
 
 To verify the protection settings, open a test pull request targeting `main` after applying the
 configuration. Confirm that the `Quality Checks` check is required and that merging is blocked
